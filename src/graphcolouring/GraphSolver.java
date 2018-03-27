@@ -2,8 +2,10 @@ package graphcolouring;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.*;
 
 public class GraphSolver {
@@ -19,22 +21,22 @@ public class GraphSolver {
 	static int t;
 
 	public static void main(String args[]) {
-		/* if (args.length<3) {
-           new Exception("Missing arguments, only "+args.length+" were specified!").printStackTrace();
-		 }
-       // arg 0 is n -> nb of nodes in the graph
-       int n = Integer.parseInt(args[0]);
-       // arg 1 is e -> nb of undirected edges in the graph
-       int e = Integer.parseInt(args[1]);
-       // arg 2 is t -> number of threads to use 
-       int t = Integer.parseInt(args[2]);
+		if (args.length<3) {
+			new Exception("Missing arguments, only "+args.length+" were specified!").printStackTrace();
+		}
+		// arg 0 is n -> nb of nodes in the graph
+		int n = Integer.parseInt(args[0]);
+		// arg 1 is e -> nb of undirected edges in the graph
+		int e = Integer.parseInt(args[1]);
+		// arg 2 is t -> number of threads to use 
+		int t = Integer.parseInt(args[2]);
 
-       assert(n > 3);
-       assert(e > 0);
-       assert(t > 0);*/
-		n = 5;
-		e = 3;
-		t = 1;
+		assert(n > 3);
+		assert(e > 0);
+		assert(t > 0);
+		n = 10000;
+		e = 8000;
+		t = 6;
 
 		graphEdges = new boolean[n][n];
 		graphColors = new int[n];
@@ -45,6 +47,7 @@ public class GraphSolver {
 		//printGraph();
 		//Concurrently solve graph coloring without blocking (i.e. use atomics primitives (CAS,TS) and volatile)
 		//conflicting = new AtomicBoolean[n];	//Init the conflicting set
+		long time1 = System.currentTimeMillis();
 		conflicting = new boolean[n];
 		for(int i=0; i<conflicting.length; i++) {
 			conflicting[i] = true;
@@ -53,12 +56,16 @@ public class GraphSolver {
 			assign();
 			DetectConflicts();
 		}
-		printGraph();
-		printColors();
+		//printGraph();
+		//printColors();
 		//Print time to solve the graph coloring
+		System.out.println("Time taken: "+(System.currentTimeMillis()-time1));
 		//Verify correct coloring
+		System.out.println("Maximum node degree: "+getMaximumDegree());
+		System.out.println("Maximum color: "+getMaximumColor());
 	}
 	
+
 	public static void assign() {
 		Thread[] threads = new Thread[t];
 		for(int i=0; i<threads.length; i++) {
@@ -117,7 +124,6 @@ public class GraphSolver {
 					graphEdges[i][j] = true;
 					graphEdges[j][i] = true;
 					edgeCount++;
-
 				}
 			}
 			j++;
@@ -132,6 +138,33 @@ public class GraphSolver {
 		return ans;
 	}
 
+	private static int getLowestColor(int node) {
+		Set<Integer> neighborsColors = new HashSet<Integer>();
+		//for all neighbors
+		for(int i=0; i<graphEdges.length;i++) {
+			if(graphEdges[node][i]) {	//if node i is a neighbor
+				neighborsColors.add(graphColors[i]);
+			}
+		}
+		int ans = 1;
+		while(neighborsColors.contains(ans)) {ans++;}
+		return ans;
+	}
+	
+	private static boolean isConflict(int node) {
+		int nodeColor = graphColors[node];
+		//For all neighbors
+		for(int i=0; i<graphEdges.length;i++) { //if node i is a neighbor
+			if(graphEdges[node][i]) {
+				if(graphColors[i] == nodeColor) {
+					return true;
+				}
+			}
+		}
+		
+		return false;
+	}
+	
 	//Helpers
 	private static int triangularSerie(int x) {
 		if(x==0)return x;
@@ -148,38 +181,32 @@ public class GraphSolver {
 		}
 	}
 	
+	public static int getMaximumColor() {
+		int max = 0;
+		for(int i=0; i<graphColors.length;i++) {
+			max = Math.max(graphColors[i], max);
+		}
+		return max;
+	}
+	
+	public static int getMaximumDegree() {
+		int max = 0;
+		for(int i=0;i<graphEdges.length;i++) {
+			int nodeDegree = 0;
+			for(int j=0; j<graphEdges[i].length;j++) {
+				if(graphEdges[i][j])nodeDegree++;
+			}
+			max = Math.max(max, nodeDegree);
+		}
+		return max;
+	}
+	
+	
 	private static void printColors() {
 		for(int i=0; i<graphColors.length;i++) {
 			System.out.print("["+graphColors[i]+"]");
 		}
-	}
-	
-	private static int getLowestColor(int node) {
-		PriorityQueue<Integer> colors = new PriorityQueue<Integer>(Collections.reverseOrder());
-		//for all neighbors
-		for(int i=0; i<graphEdges.length;i++) {
-			if(graphEdges[node][i]) {	//if node i is a neighbor
-				colors.add(graphColors[i]);
-			}
-		}
-		if(colors.isEmpty()) {
-			return 1;
-		}
-		return colors.poll()+1;
-	}
-	
-	private static boolean isConflict(int node) {
-		int nodeColor = graphColors[node];
-		//For all neighbors
-		for(int i=0; i<graphEdges.length;i++) { //if node i is a neighbor
-			if(graphEdges[node][i]) {
-				if(graphColors[i] == nodeColor) {
-					return true;
-				}
-			}
-		}
-		
-		return false;
+		System.out.println("");
 	}
 	
 	static class NodeColorer implements Runnable{
