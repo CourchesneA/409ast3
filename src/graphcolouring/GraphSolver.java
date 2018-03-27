@@ -1,13 +1,16 @@
 package graphcolouring;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.PriorityQueue;
 import java.util.Random;
-
-import sun.awt.Graphics2Delegate;
+import java.util.concurrent.atomic.*;
 
 public class GraphSolver {
 
 	volatile static boolean[][] graphEdges;	//[i][j] is true if there is an edge, only bottom left part is used (where i > j)
 	volatile static int[] graphColors;
+	volatile static boolean[] conflicting;
 	static int nbEntries; //Number of usable entry in the array (i.e. number of possible edges)
 	static int edgeCount=0;
 	static Random rnd = new Random();
@@ -31,6 +34,7 @@ public class GraphSolver {
        assert(t > 0);*/
 		n = 5;
 		e = 3;
+		t = 1;
 
 		graphEdges = new boolean[n][n];
 		graphColors = new int[n];
@@ -38,10 +42,51 @@ public class GraphSolver {
 
 		//Sequentially create the graph, edges between random pairs of nodes
 		constructRandomGraph();
-		printGraph();
+		//printGraph();
 		//Concurrently solve graph coloring without blocking (i.e. use atomics primitives (CAS,TS) and volatile)
+		//conflicting = new AtomicBoolean[n];	//Init the conflicting set
+		conflicting = new boolean[n];
+		for(int i=0; i<conflicting.length; i++) {
+			conflicting[i] = true;
+		}
+		while(!arrayIsEmpty(conflicting)) {
+			assign();
+			DetectConflicts();
+		}
+		printGraph();
+		printColors();
 		//Print time to solve the graph coloring
 		//Verify correct coloring
+	}
+	
+	public static void assign() {
+		Thread[] threads = new Thread[t];
+		for(int i=0; i<threads.length; i++) {
+			threads[i] = new Thread(new NodeColorer(),""+i);
+		}
+		for(int i=0; i<threads.length;i++) {
+			threads[i].start();
+		}
+		for(int i=0; i< threads.length;i++) {
+			try {
+				threads[i].join();
+			} catch (InterruptedException e) {}
+		}
+	}
+	
+	public static void DetectConflicts() {
+		Thread[] threads = new Thread[t];
+		for(int i=0; i<threads.length; i++) {
+			threads[i] = new Thread(new ConflictDetector(),""+i);
+		}
+		for(int i=0; i<threads.length;i++) {
+			threads[i].start();
+		}
+		for(int i=0; i< threads.length;i++) {
+			try {
+				threads[i].join();
+			} catch (InterruptedException e) {}
+		}
 	}
 
 	/**
@@ -67,9 +112,10 @@ public class GraphSolver {
 				//chance of choosing this edge is nb of edge to add remaining / number of possible edge remaining
 				double p1=rnd.nextDouble();
 				double p2=(e-edgeCount)/(double)(nbEntries-edgeCount);
-				//if(rnd.nextDouble() <= (e-edgeCount)/(nbEntries-edgeCount)) {
+				//if(rnd.nexttrueDouble() <= (e-edgeCount)/(nbEntries-edgeCount)) {
 				if(p1 <= p2) {
 					graphEdges[i][j] = true;
+					graphEdges[j][i] = true;
 					edgeCount++;
 
 				}
@@ -78,6 +124,13 @@ public class GraphSolver {
 		}
 	}
 
+	private static boolean arrayIsEmpty(boolean[] conflicting2) {
+		boolean ans = true;
+		for(int i=0;i<conflicting2.length;i++) {
+			if(conflicting2[i])return false;
+		}
+		return ans;
+	}
 
 	//Helpers
 	private static int triangularSerie(int x) {
@@ -92,6 +145,65 @@ public class GraphSolver {
 				System.out.print("["+p+"]");
 			}
 			System.out.print("\r\n");
+		}
+	}
+	
+	private static void printColors() {
+		for(int i=0; i<graphColors.length;i++) {
+			System.out.print("["+graphColors[i]+"]");
+		}
+	}
+	
+	private static int getLowestColor(int node) {
+		PriorityQueue<Integer> colors = new PriorityQueue<Integer>(Collections.reverseOrder());
+		//for all neighbors
+		for(int i=0; i<graphEdges.length;i++) {
+			if(graphEdges[node][i]) {	//if node i is a neighbor
+				colors.add(graphColors[i]);
+			}
+		}
+		if(colors.isEmpty()) {
+			return 1;
+		}
+		return colors.poll()+1;
+	}
+	
+	private static boolean isConflict(int node) {
+		int nodeColor = graphColors[node];
+		//For all neighbors
+		for(int i=0; i<graphEdges.length;i++) { //if node i is a neighbor
+			if(graphEdges[node][i]) {
+				if(graphColors[i] == nodeColor) {
+					return true;
+				}
+			}
+		}
+		
+		return false;
+	}
+	
+	static class NodeColorer implements Runnable{
+
+		@Override
+		public void run() {
+			//For each element in this thread's part of the conflicting set
+			int id = Integer.parseInt(Thread.currentThread().getName());
+			for(int i=id; i<conflicting.length;i+=t) {
+				//Set color of vertex i to smallest color not used by adjacent node
+				graphColors[i] = getLowestColor(i);
+			}
+		}
+	}
+	
+	static class ConflictDetector implements Runnable{
+		
+		@Override
+		public void run() {
+			int id = Integer.parseInt(Thread.currentThread().getName());
+			for(int i=id; i<conflicting.length;i+=t) {
+				//Atomically set v as conflicting if it has a neighbor of the same color
+				conflicting[i] = isConflict(i);
+			}
 		}
 	}
 }
